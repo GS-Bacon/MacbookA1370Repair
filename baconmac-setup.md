@@ -68,6 +68,7 @@ GRUB_CMDLINE_LINUX_DEFAULT="pcie_aspm=force pcie_aspm.policy=performance libata.
 **追加パッケージ:**
 - `brightnessctl` (apt) — 同梱 udev rule で `/sys/class/backlight/*/brightness` を `video` group g+w、`/sys/class/leds/*/brightness` を `input` group g+w に変更
 - `xfce4-power-manager-plugins` (apt) — `power-manager-plugin` パネル item (battery + 輝度スライダー) を提供
+- `libfuse2t64` (apt, 2026-05-17 追加) — 旧来型 AppImage (`libfuse.so.2` 要求) を `--appimage-extract-and-run` 無しで直接実行可能にする。Ubuntu 24.04 t64 transition で `libfuse2` から改名。`fuse3` 系 (`libfuse3.so.4`) は既に入っているが AppImage の多くは依然 fuse2 要求。**メニュー統合 (AppImageLauncher / appimaged) は未導入** — 必要になったら後付け
 
 **ユーザー groups (`bacon`):**
 - `video` 追加済 (2026-05-11) — `brightnessctl` で `intel_backlight` を user 権限書込可
