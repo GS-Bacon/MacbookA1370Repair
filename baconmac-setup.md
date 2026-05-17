@@ -68,7 +68,8 @@ GRUB_CMDLINE_LINUX_DEFAULT="pcie_aspm=force pcie_aspm.policy=performance libata.
 **追加パッケージ:**
 - `brightnessctl` (apt) — 同梱 udev rule で `/sys/class/backlight/*/brightness` を `video` group g+w、`/sys/class/leds/*/brightness` を `input` group g+w に変更
 - `xfce4-power-manager-plugins` (apt) — `power-manager-plugin` パネル item (battery + 輝度スライダー) を提供
-- `libfuse2t64` (apt, 2026-05-17 追加) — 旧来型 AppImage (`libfuse.so.2` 要求) を `--appimage-extract-and-run` 無しで直接実行可能にする。Ubuntu 24.04 t64 transition で `libfuse2` から改名。`fuse3` 系 (`libfuse3.so.4`) は既に入っているが AppImage の多くは依然 fuse2 要求。**メニュー統合 (AppImageLauncher / appimaged) は未導入** — 必要になったら後付け
+- `libfuse2t64` (apt, 2026-05-17 追加) — 旧来型 AppImage (`libfuse.so.2` 要求) を `--appimage-extract-and-run` 無しで直接実行可能にする。Ubuntu 24.04 t64 transition で `libfuse2` から改名。`fuse3` 系 (`libfuse3.so.4`) は既に入っているが AppImage の多くは依然 fuse2 要求
+- `appimagelauncher` v3.0.0-beta-3 (TheAssassin/AppImageLauncher GitHub release deb, 2026-05-17 追加) — AppImage ダブルクリック時に「Integrate and run?」ダイアログ → `~/Applications` に移動 + `.desktop` 生成 + アイコン抽出を自動化。仕組みは `binfmt_misc` 経由で `/opt/appimagelauncher.AppDir/.../binfmt-interpreter` を AppImage の interpreter として登録 (`/proc/sys/fs/binfmt_misc/appimage-type1`, `appimage-type2`)。`appimagelauncherd.service` (user systemd) で daemon 常駐。**apt には無いので deb 取得が必要** (`gh release download v3.0.0-beta-3 -R TheAssassin/AppImageLauncher --pattern '*amd64.deb'` → `sudo apt install -y /tmp/appimagelauncher_*.deb` → `systemctl --user enable --now appimagelauncherd.service`)
 
 **ユーザー groups (`bacon`):**
 - `video` 追加済 (2026-05-11) — `brightnessctl` で `intel_backlight` を user 権限書込可
