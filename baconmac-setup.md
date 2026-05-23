@@ -1,6 +1,6 @@
 # baconmac (MacBookAir4,1) Linux 化 セットアップ記録
 
-**最終更新**: 2026-05-11 (F1/F2/F5/F6 ハードキー対応 / brightnessctl + UPower KbdBacklight / panel に power-manager-plugin 追加)
+**最終更新**: 2026-05-23 (powertop 計測でバッテリー消費調査 / Bluetooth USB autosuspend 適用 / CPU 2.6GHz 張り付き記述ズレ修正)
 **機種**: Apple MacBook Air (Mid 2011, MacBookAir4,1)
 **スペック**: i7-2677M (Sandy Bridge) / Intel HD3000 / BCM43224 WiFi / 3.7GiB / SanDisk SD9TN8W M.2 SSD (変換アダプタ)
 **OS**: Ubuntu 26.04 LTS Server (kernel 7.0.0-14-generic) / XFCE4
@@ -560,6 +560,93 @@ xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Primary><Super>v'
 sudo systemctl restart kanata
 ```
 
+## バッテリー消費調査と Bluetooth USB autosuspend (2026-05-23 追加)
+
+「バッテリーの減りが早い (サードパーティ換装以外の原因)」相談を受けて powertop 2.15 で 15 分 idle 計測。結果と適用した対策の記録。
+
+### 計測結果サマリ (`/tmp/powertop-15min.html`)
+
+| 項目 | 値 | 評価 |
+|---|---|---|
+| Package C7 residency | 86.8% | 良 (Sandy Bridge として高位) |
+| CPU C7 residency | 98.0-98.5% | 良 |
+| CPU 周波数 idle 中 | 800MHz 76.9% / 平均 920-1000MHz | 良 (旧記載 "2.6GHz 張り付き" は再現せず) |
+| Display backlight | 100% (1808/1808 MAX) | 改善余地大 |
+| Bluetooth USB devices (820a/820b/821f) | runtime active | 改善 (本節で対処) |
+| PCI Runtime PM (Thunderbolt×6, HD3000, USB Host) | 全て 'on' | 改善余地中、hang リスクあるため保留 |
+| SATA LPM | max_performance | 触らない (`libata.force=nolpm` で SSD hang 防止) |
+| Apple Internal KB/TP autosuspend | OFF | 触らない (入力遅延) |
+
+### バッテリー (現状実測)
+
+- 装着中: `ZSN A1406` サードパーティ
+- `energy-full = 38.48 Wh` (純正 50Wh から **-23%**)
+- `charge-cycles: 9` (BMS 校正未完了の可能性)
+- 「減りが早い」体感の主因はサードパーティ容量 -23% (確定、根治不可)
+
+### バッテリーインジケータ更新が遅い理由
+
+設定では無く、以下の自然挙動の合算:
+- `/etc/UPower/UPower.conf` の `NoPollBatteries=false` で UPower polling ≈60秒 (`upower -i` history 差分 62秒で実測)
+- `power-manager-plugin` は UPower の `PropertiesChanged` シグナルでアイコン再描画
+- アイコンは 10% 刻みのアートしか持たない
+- idle 1〜3 分で 1% 減 → アイコン体感「数分に1回」
+
+### 適用した対策: Bluetooth USB autosuspend
+
+`/etc/modprobe.d/blacklist-bluetooth.conf` で kernel modules (btusb/bluetooth/btbcm/btintel/btrtl) は blacklist 済だが、**USB 側では device が常時 enumerate されて D0 のまま**だった (powertop の Tunables Bad に上がる)。設定したのは:
+
+```bash
+# /etc/udev/rules.d/72-baconmac-bluetooth-autosuspend.rules
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", ATTR{idProduct}=="820a", TEST=="power/control", ATTR{power/control}="auto"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", ATTR{idProduct}=="820b", TEST=="power/control", ATTR{power/control}="auto"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", ATTR{idProduct}=="821f", TEST=="power/control", ATTR{power/control}="auto"
+```
+
+対象 device:
+- `05ac:820a` Bluetooth HID Keyboard (USB ID, 物理キーボードではない)
+- `05ac:820b` Bluetooth HID Mouse (USB ID, 物理マウスではない)
+- `05ac:821f` Built-in Bluetooth 2.0+EDR HCI
+
+確認:
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger --action=add --subsystem-match=usb
+sleep 5
+for p in /sys/bus/usb/devices/2-1.1.{1,2,3}; do
+  printf '%s control=%s runtime=%s\n' "$p" "$(cat $p/power/control)" "$(cat $p/power/runtime_status)"
+done
+# 期待: 全て control=auto runtime=suspended
+```
+
+期待効果: 推定 -0.5〜1W。HID Keyboard/Mouse は実物が無いので suspend からの wake は不要。
+
+### 適用見送りの対策 (記録のみ)
+
+リスクと効果のバランスで今回見送り。再検討時は以下を参考:
+
+| 対策 | 期待効果 | 主リスク |
+|---|---|---|
+| 画面輝度 100→70% | -2〜3W | UX (暗くなる) |
+| PCI Runtime PM 全 auto (Thunderbolt×6, HD3000 GPU, EHCI/UHCI USB Host, LPC, MEI, PCIe Root) | -2〜5W 推定 | GPU/Thunderbolt PM での hang 履歴あり、1個ずつ適用 + idle 検証必要 |
+| VM writeback timeout 500→1500 cs | 小 | SSD 寿命寄り |
+| NMI watchdog OFF (現在 ON) | 微小 | debug 用に残置中、不要なら OFF 可 |
+
+### 触ってはいけない (再掲)
+
+- `libata.force=nolpm` 解除 → SSD hang 再発 (SanDisk + Apple AHCI)
+- `pcie_aspm.policy=performance` → powersave 変更で過去 ASPM hang 履歴復活リスク
+- Apple Internal Keyboard/Trackpad の autosuspend → 入力遅延
+
+### 計測再現コマンド
+
+```bash
+sudo apt install -y powertop
+# AC 抜いて battery 駆動で計測するのが正確 (今回は AC 接続のままで battery drain W は不明)
+sudo powertop --time=900 --html=/tmp/powertop-15min.html
+# powertop 2.15 は --csv と --html の併用で CSV 側が出ない場合あり、--html 単独推奨
+```
+
 ## 切り分け履歴 (重要な学び)
 
 1. 「ランダムハング」で当初 ASPM/C-state を疑い対策 → 部分的解決
@@ -586,5 +673,6 @@ sudo systemctl restart kanata
 22. **fusuma を input group 無しで動かす canonical な方法**: `usermod -aG input bacon` はキーボード event4 も読めるためキーロガ系の権限拡大。代わりに `/etc/udev/rules.d/71-fusuma-touchpad.rules` に `SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHPAD}=="1", TAG+="uaccess"` を置き、`73-seat-late.rules` の uaccess builtin がアクティブセッションユーザーに touchpad event7 だけ ACL を付与する。rule ファイル名は `60-input-id.rules` 後・`73-seat-late.rules` 前 (= 70 番台) 必須
 23. **kanata tap-hold の chord 発火**: `(tap-hold 200 200 lmet (layer-while-held modlayer))` で Cmd を 200ms 以上保持すると modlayer 入り。素早く Cmd→矢印すると tap 判定→Super_L 単発+矢印単発に分解されることがあり Super+矢印 として届かない。実用上は意識的に「Cmd 押す→少し待つ→矢印」で確実。早押し対策が必要なら `tap-hold-press` 変種 + 数値を 150 等に下げる
 24. **systray に WiFi アイコンが2個出る (nm-applet 二重表示)**: nm-applet は `libayatana-appindicator3` にリンクされており、SNI host (xfce4-panel の systray plugin) が見えれば SNI mode で動く。が、**autostart 経由で xfce4-panel より先に起動**すると SNI host が見つからず `GtkStatusIcon` (XEmbed legacy) に fallback してアイコンを embed → 後から SNI host が立ち上がっても fallback icon が掃除されず、SNI mode の新アイコンと並んで2個表示される。`xfconf-query -c xfce4-panel -p /plugins/plugin-6/known-legacy-items` に `ネットワーク` (locale=ja) と `network` (locale=C) の両方が残るのが症状指標。検証: `pkill -x nm-applet && sleep 2 && nm-applet &` で panel 起動後に再起動すると SNI 1個だけになる。**恒久対応**: `~/.config/autostart/nm-applet.desktop` の `Exec=nm-applet` を `Exec=sh -c 'sleep 5 && exec nm-applet'` に変更し SNI host より後に起動させる (2026-05-23 適用)
+25. **「バッテリー減りが早い」相談 → powertop で2つの誤認を訂正**: (a) setup.md の「CPU 2.6GHz 張り付き (kanata/fcitx5 由来、受容)」記述は kernel 7.0.0-14 + schedutil で**現状再現せず** (idle 中 800MHz 76.9% / CPU C7 98%)。(b) 「真の主因」と想定していた CPU/TLP まわりではなく、**ZSN A1406 サードパーティの容量 38.48Wh (純正 50Wh から -23%)** が確定的主因で根治不可。残りは Display backlight 100% / Bluetooth USB が autosuspend OFF / PCI Runtime PM 全 ON が改善余地。**今回は低リスクな Bluetooth USB autosuspend のみ適用** (`/etc/udev/rules.d/72-baconmac-bluetooth-autosuspend.rules`)、PCI Runtime PM と輝度下げは hang リスク評価とトレードオフのため保留。powertop 2.15 は `--csv` と `--html` 併用で CSV 側が出ないことあり (`--html` 単独が確実)
 
 詳細な切り分け過程は Windows 側 `C:\Users\bacon\OneDrive\デスクトップ\baconmac-トラブル原因と解決策.md`。
