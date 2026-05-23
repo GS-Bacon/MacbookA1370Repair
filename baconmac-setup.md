@@ -16,7 +16,7 @@
 | SSD hang (1分毎 cycle) | DIPM resume failure (SanDisk + Apple AHCI) | GRUB: `libata.force=nolpm` |
 | 電源 hang (AC flap) | ACPI GPE17 storm (USB-C→MagSafe ケーブル) | AC driver unbind systemd unit + GPE17 mask |
 | **WiFi (BCM43224) hang** | **PCI MSI 互換性** | **GRUB: `pci=nomsi`** (MacBookAir4,1 既知 workaround) |
-| CPU 2.6GHz 張り付き | kanata/fcitx5 input 待機 | 受容 (機能優先)、deep C-state で熱緩和 |
+| CPU 2.6GHz 張り付き (旧記載、現状は解消) | kanata/fcitx5 input 待機が原因と推定していた | 2026-05-23 powertop 15分計測で **idle 中 800MHz 76.9% / 平均 920-1000MHz / Package C7 86.8% / CPU C7 98.0-98.5%** を実測。kernel 7.0.0-14 + schedutil で再現せず |
 | fan 2000RPM 固定 | applesmc bug Ubuntu #461184 | mbpfan で coretemp ベース自動制御 |
 | 充電キレ (HW) | サードパーティ USB-C→MagSafe ケーブル | SW 修復不可、純正 Apple アダプタ交換が根治 |
 | 蓋閉じても LCD/リンゴ/KBD LED 点灯 | logind ignore + xfce4-pm lid-action=0 + SW_LID 不安定 + Apple ACPI _BCM 不動作 | GRUB に `acpi_backlight=native` 追加 → `intel_backlight` 露出、polling daemon (`baconmac-lid-poll.service`) で `/proc/acpi/button/lid/LID0/state` を 1秒間隔監視し intel_backlight + smc::kbd_backlight を退避/復元 |
@@ -259,7 +259,7 @@ pgrep -af kanata
 
 - **充電不安定 (HW)**: 純正 Apple 60W/85W MagSafe1 アダプタ交換が根治
   - SW で完全諦め確認済 (`/sys/class/power_supply/ADP1/online` は read-only、USB PD ネゴは HW レベル、Linux 介入不可)
-- **CPU stuck 2.6GHz**: kanata/fcitx5 由来、機能維持のため受容 (deep C-state で熱は緩和されている)
+- ~~**CPU stuck 2.6GHz**: kanata/fcitx5 由来、機能維持のため受容 (deep C-state で熱は緩和されている)~~ → **2026-05-23 解消確認**。powertop 15分計測 (idle、AC 接続) で 800MHz 76.9% / 平均 920-1000MHz / CPU C7 98% を観測。schedutil + 現行 kernel で問題なし。「2.6GHz 張り付き」は過去観測されたが現状は再現しない
 - **AutoPowerOn (AC で勝手に起動)**: SMC 仕様、Linux applesmc は read のみ、macOS で `nvram AutoBoot=%00` 必要
 - **トラックパッド3本指/4本指ジェスチャ**: 2026-05-12 に **fusuma** で対応 (詳細は後段 UX 改善セクション)
 
